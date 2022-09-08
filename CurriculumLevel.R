@@ -1,61 +1,98 @@
-# this variation takes graduates from a program and looks at their registration history within certain disciplines
-# the model for this is NSC
-
-# we need to say where the data file is--
-setwd("C:/Users/deubanks/Box Sync/GitHub/CurriculumLevel") #change to your directory. Note FORWARD slashes
+#' Create a folder of plots that show the relationship between course levels and timing:
+#' when do students take courses? We might assume that lower level courses are most commonly
+#' taken by first-year students, and upper-level courses by seniors, but is that the case?
 
 # load libraries
-library(dplyr)
-library(tidyr)
-library(ggplot2)
+library(tidyverse)
 
-#read data from csv, select only the three fields we care about
-data <- read.csv("Grades.csv", as.is = TRUE) %>% select(Subject, Number, YearTaken)
-
-# rounds the number to 100s. May need to adjust, e.g. if you have four-digit course numbers change 100 to 1000
-data$Number <- as.integer(substr(data$Number,1,1)) * 100 #assumes a 1xx, 2xx, etc. number system
-
-# this eliminates oddities in the data. Use accordingly
-data <- data %>% filter(YearTaken >= 0, Number < 500) # you can filter the ranges here
-
-# if you want to inspect first, this creates a box plot of the total average
-ggplot(data,aes(factor(Number),YearTaken)) + geom_boxplot()
+#' Read data from csv, which should be in the /data folder. 
+#' Select only the fields we care about
+courses <- read_csv("data/sample.csv") %>% 
+            select(Subject, Number, YearTaken) %>% 
+            # assumes three-digit course numbers here
+            mutate(Number = as.integer(str_sub(Number, 1, 1))*100) %>% 
+            # filter to a usable range
+            filter(YearTaken >= 0, Number < 500) 
 
 # institutional average YearTaken by course number, for reference
-total <- data %>% group_by(Number) %>% summarize(Years = mean(YearTaken))
+inst_avg <- courses %>% 
+            group_by(Number) %>% 
+            summarize(YearTaken = mean(YearTaken))
 
-# create data for each plot, summarizing avg year taken by subject and number
-plots <- data %>% group_by(Subject,Number) %>% summarize(Years = mean(YearTaken))
+inst_props <- courses %>% 
+  count(Number, YearTaken) %>% 
+  group_by(Number) %>% 
+  mutate(p = n/sum(n),
+         YearTaken = str_c("Year ", YearTaken)) %>% 
+  ungroup()
 
-# fill in missing rows for plots that have missing data
-# http://stackoverflow.com/questions/9996452/r-find-and-add-missing-non-existing-rows-in-time-related-data-frame
-vals <- expand.grid(Number = unique(plots$Number),
-                    Subject = unique(plots$Subject))
-plots <- merge(vals,plots,all = TRUE)
+# create summaries for each subject plot
+sub_avg <- courses %>% 
+           group_by(Subject,Number) %>% 
+           summarize(YearTaken = mean(YearTaken))
 
-# setwd("CHANGE TO FOLDER YOU WANT THE GRAPHS TO GO TO")
+subj_props <- courses %>% 
+  count(Subject, Number, YearTaken) %>% 
+  group_by(Subject, Number) %>% 
+  mutate(p = n/sum(n),
+         YearTaken = str_c("Year ", YearTaken)) %>% 
+  ungroup()
 
 ########## the loop before runs through each subject and creates a .png graph
 
 # get the list of unique subjects 
-subjects <- as.vector(unlist(plots %>% select(Subject) %>% unique()))
+subjects <- unique(sub_avg$Subject)
 
-for (subj in subjects){
-
+for (subject in subjects){
+  
   # file names, e.g. BIO.png
-  fname <- paste0(subj,".png")
+  fname <- str_c("images/",subject,".png")
+  
+  # filter the data to the subject we will plot
+  plot_data <- sub_avg %>% 
+    filter(Subject == subject) 
   
   # you can change the size of the graph here
-  png(filename = fname, width = 480, height = 480, units = "px", pointsize = 12, bg = "white")
+  #png(filename = fname, width = 480, height = 480, units = "px", pointsize = 12, bg = "white")
   
-  # select the one we're looking at
-  t <- plots %>% filter(Subject == subj)
+  # plot averages
+  plot_data %>% 
+    ggplot(aes(x = Number, y = YearTaken)) +
+    geom_line(color = "steelblue") +
+    geom_point(color = "steelblue") +
+    geom_line(aes(x = Number, y = YearTaken), data = inst_avg, linetype = "dashed") +
+    ggtitle(subject) +
+    coord_cartesian(ylim = c(1,4)) +
+    theme_bw()
   
-  # generate the graph
-  print(plot(total$Number,total$Years, col = "red",main= subj, xlim = c(100,400), ylim = c(0,4), xlab = "Course Level",ylab ="Avg Year Taken"))
-  print(lines(total$Number,total$Years, lwd = .5, col = "red", lty = 2))
-  print(points(t$Number,t$Years))
-  print(lines(t$Number,t$Years, lwd = 2))
-  dev.off()
+  # save to disk
+  ggsave(fname)
+  
+  ##################### Proportions ##########################
+  
+  # file names, e.g. BIO.png
+  fname <- str_c("images/",subject,"_props.png")
+  
+  # filter the data to the subject we will plot
+  plot_data <- subj_props %>% 
+    filter(Subject == subject) 
+  
+  # you can change the size of the graph here
+  #png(filename = fname, width = 480, height = 480, units = "px", pointsize = 12, bg = "white")
+  
+  # plot averages
+  plot_data %>% 
+    ggplot(aes(x = Number, y = p)) +
+    geom_line(color = "steelblue") +
+    geom_point(color = "steelblue") +
+    geom_line(aes(x = Number, y = p), data = inst_props, linetype = "dashed") +
+    ggtitle(subject) +
+    theme_bw() +
+    scale_y_continuous(labels = scales::percent) +
+    facet_grid(. ~ YearTaken) +
+    ylab("Proportion taking courses")
+  
+  # save to disk
+  ggsave(fname)
+  
 }
-
